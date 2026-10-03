@@ -26,10 +26,13 @@ public class StoragePitService {
 
     private final StoragePitRepository pitRepository;
     private final IncineratorRepository incineratorRepository;
+    private final AbnormalOrderService abnormalOrderService;
 
-    public StoragePitService(StoragePitRepository pitRepository, IncineratorRepository incineratorRepository) {
+    public StoragePitService(StoragePitRepository pitRepository, IncineratorRepository incineratorRepository,
+            AbnormalOrderService abnormalOrderService) {
         this.pitRepository = pitRepository;
         this.incineratorRepository = incineratorRepository;
+        this.abnormalOrderService = abnormalOrderService;
     }
 
     @Transactional(readOnly = true)
@@ -80,6 +83,16 @@ public class StoragePitService {
         }
         Incinerator furnace = incineratorRepository.findByFurnaceCode(request.getTargetFurnaceCode())
                 .orElseThrow(() -> new BizException("目标炉号不存在：" + request.getTargetFurnaceCode()));
+        String operator = request.getOperator() == null || request.getOperator().isBlank()
+                ? "中控值班" : request.getOperator();
+        AbnormalOrderService.FeedingGuardResult guard = abnormalOrderService
+                .checkFeedingAllowed(furnace.getFurnaceCode(), operator);
+        if (!guard.isAllowed()) {
+            throw new BizException(guard.getReason());
+        }
+        furnace = incineratorRepository.findByFurnaceCodeForUpdate(request.getTargetFurnaceCode())
+                .orElseThrow(() -> new BizException("目标炉号不存在：" + request.getTargetFurnaceCode()));
+        abnormalOrderService.assertFeedingStillLocked(furnace.getFurnaceCode(), operator);
         if ("SHUTDOWN".equals(furnace.getCombustionStatus())) {
             throw new BizException("炉号 " + furnace.getFurnaceCode() + " 处于停炉状态，不允许投料");
         }
@@ -140,6 +153,14 @@ public class StoragePitService {
                 .toList());
         dict.put("furnaceCodes", incineratorRepository.findAll().stream()
                 .map(Incinerator::getFurnaceCode).toList());
+        java.util.Map<String, Boolean> feedingLocks = incineratorRepository.findAll().stream()
+                .collect(java.util.stream.Collectors.toMap(Incinerator::getFurnaceCode,
+                        f -> abnormalOrderService.hasClosedFrozenOrder(f.getFurnaceCode())
+                                || abnormalOrderService.activeForFurnace(f.getFurnaceCode())
+                                        .map(order -> Boolean.TRUE.equals(order.getFeedingLocked()))
+                                        .orElse(false),
+                        (a, b) -> a));
+        dict.put("feedingLocks", feedingLocks);
         dict.put("fullRate", Dict.PIT_FULL_RATE);
         return dict;
     }

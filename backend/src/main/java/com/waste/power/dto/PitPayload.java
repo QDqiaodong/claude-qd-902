@@ -16,6 +16,7 @@ public class PitPayload {
         private String grabNo;
         private BigDecimal feedTon;
         private String targetFurnaceCode;
+        private String operator;
 
         public String getGrabNo() {
             return grabNo;
@@ -39,6 +40,14 @@ public class PitPayload {
 
         public void setTargetFurnaceCode(String targetFurnaceCode) {
             this.targetFurnaceCode = targetFurnaceCode;
+        }
+
+        public String getOperator() {
+            return operator;
+        }
+
+        public void setOperator(String operator) {
+            this.operator = operator;
         }
     }
 

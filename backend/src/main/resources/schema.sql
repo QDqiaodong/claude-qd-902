@@ -181,7 +181,117 @@ CREATE TABLE `env_alarm` (
   UNIQUE KEY `uk_alarm_no` (`alarm_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='环保告警';
 
--- ---------------- 9. 灰渣与渗滤液台账 ----------------
+-- ---------------- 9. 异常工况处置单闭环 ----------------
+DROP TABLE IF EXISTS `abnormal_order_event`;
+DROP TABLE IF EXISTS `abnormal_grab_snapshot`;
+DROP TABLE IF EXISTS `abnormal_order_alarm`;
+DROP TABLE IF EXISTS `abnormal_furnace_snapshot`;
+DROP TABLE IF EXISTS `abnormal_work_order`;
+
+CREATE TABLE `abnormal_work_order` (
+  `id`                  BIGINT       NOT NULL AUTO_INCREMENT,
+  `order_no`            VARCHAR(32)  NOT NULL COMMENT '处置单编号',
+  `furnace_code`        VARCHAR(32)  NOT NULL COMMENT '炉号',
+  `status`              VARCHAR(16)  NOT NULL COMMENT 'PENDING/PROCESSING/REVIEWING/RECOVERED/CLOSED',
+  `trigger_source`      VARCHAR(16)  NOT NULL COMMENT 'AUTO_COMBUSTION/AUTO_EMISSION/MANUAL',
+  `trigger_reason`      VARCHAR(512) NOT NULL COMMENT '触发原因',
+  `trigger_detail_json` TEXT         DEFAULT NULL COMMENT '触发时补充信息 JSON',
+  `feeding_locked`      TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '投料联锁是否生效',
+  `freeze_reason`       VARCHAR(256) DEFAULT NULL COMMENT '冻结/保持冻结原因',
+  `owner_name`          VARCHAR(32)  DEFAULT NULL COMMENT '负责人',
+  `measures`            VARCHAR(1024) DEFAULT NULL COMMENT '处置措施',
+  `review_request_note` VARCHAR(512) DEFAULT NULL COMMENT '申请复核说明',
+  `requested_at`        DATETIME     DEFAULT NULL COMMENT '申请复核时间',
+  `reviewer_name`       VARCHAR(32)  DEFAULT NULL COMMENT '复核人',
+  `review_note`         VARCHAR(512) DEFAULT NULL COMMENT '复核意见',
+  `reviewed_at`         DATETIME     DEFAULT NULL COMMENT '复核恢复时间',
+  `data_missing_choice` VARCHAR(32)  DEFAULT NULL COMMENT 'WAIT/CLOSE_KEEP_FROZEN',
+  `data_missing_reason` VARCHAR(512) DEFAULT NULL COMMENT '告警数据缺失时的选择理由',
+  `close_note`          VARCHAR(512) DEFAULT NULL COMMENT '关闭说明',
+  `closed_at`           DATETIME     DEFAULT NULL COMMENT '关闭时间',
+  `closed_by`           VARCHAR(32)  DEFAULT NULL COMMENT '关闭人',
+  `version`             BIGINT       NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
+  `created_at`          DATETIME     NOT NULL,
+  `updated_at`          DATETIME     NOT NULL,
+  `active_flag`         TINYINT GENERATED ALWAYS AS (CASE WHEN `status` IN ('PENDING','PROCESSING','REVIEWING','RECOVERED') THEN 1 ELSE NULL END) STORED COMMENT '同炉有效单唯一约束辅助列',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_abnormal_order_no` (`order_no`),
+  UNIQUE KEY `uk_active_furnace_order` (`furnace_code`, `active_flag`),
+  KEY `idx_abnormal_status` (`status`),
+  KEY `idx_abnormal_furnace_time` (`furnace_code`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='异常工况处置单';
+
+CREATE TABLE `abnormal_furnace_snapshot` (
+  `id`                     BIGINT       NOT NULL AUTO_INCREMENT,
+  `order_id`               BIGINT       NOT NULL,
+  `furnace_code`           VARCHAR(32)  NOT NULL,
+  `furnace_name`           VARCHAR(64)  DEFAULT NULL,
+  `furnace_type_code`      VARCHAR(16)  DEFAULT NULL,
+  `furnace_temp_c`         DECIMAL(8,1) DEFAULT NULL,
+  `flue_gas_residence_s`   DECIMAL(6,2) DEFAULT NULL,
+  `co_ppm`                 DECIMAL(8,2) DEFAULT NULL,
+  `combustion_status`      VARCHAR(16)  DEFAULT NULL,
+  `daily_process_ton`      DECIMAL(10,2) DEFAULT NULL,
+  `grab_no`                VARCHAR(16)  DEFAULT NULL,
+  `qualified`              TINYINT(1)   NOT NULL DEFAULT 0,
+  `unqualified_items_json` VARCHAR(512) DEFAULT NULL,
+  `snapshot_time`          DATETIME     NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_furnace_snapshot_order` (`order_id`),
+  KEY `idx_furnace_snapshot_furnace` (`furnace_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='异常处置炉况快照';
+
+CREATE TABLE `abnormal_order_alarm` (
+  `id`               BIGINT       NOT NULL AUTO_INCREMENT,
+  `order_id`         BIGINT       NOT NULL,
+  `alarm_id`         BIGINT       NOT NULL,
+  `alarm_no`         VARCHAR(32)  NOT NULL,
+  `indicator_code`   VARCHAR(16)  NOT NULL,
+  `indicator_name`   VARCHAR(32)  DEFAULT NULL,
+  `measured_value`   DECIMAL(12,3) DEFAULT NULL,
+  `limit_value`      DECIMAL(12,3) DEFAULT NULL,
+  `exceed_ratio`     DECIMAL(8,2) DEFAULT NULL,
+  `alarm_level`      VARCHAR(16)  DEFAULT NULL,
+  `period_label`     VARCHAR(64)  DEFAULT NULL,
+  `stack_code`       VARCHAR(32)  DEFAULT NULL,
+  `alarm_time`       DATETIME     DEFAULT NULL,
+  `attached_source`  VARCHAR(32)  NOT NULL COMMENT 'INITIAL/MERGED/REBOUND',
+  `force_missing_data` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '人工确认该告警后续监测数据暂不可用',
+  `attached_at`      DATETIME     NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_order_alarm` (`order_id`, `alarm_id`),
+  KEY `idx_order_alarm_time` (`order_id`, `alarm_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='处置单关联严重告警证据';
+
+CREATE TABLE `abnormal_grab_snapshot` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT,
+  `order_id`          BIGINT       NOT NULL,
+  `grab_no`           VARCHAR(16)  NOT NULL,
+  `pit_no`            VARCHAR(16)  DEFAULT NULL,
+  `pit_name`          VARCHAR(64)  DEFAULT NULL,
+  `current_stock_ton` DECIMAL(10,2) DEFAULT NULL,
+  `pit_status`        VARCHAR(16)  DEFAULT NULL,
+  `snapshot_time`     DATETIME     NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_grab_snapshot_order` (`order_id`, `grab_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='供料抓斗与储坑快照';
+
+CREATE TABLE `abnormal_order_event` (
+  `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+  `order_id`     BIGINT       NOT NULL,
+  `event_type`   VARCHAR(48)  NOT NULL,
+  `from_status`  VARCHAR(16)  DEFAULT NULL,
+  `to_status`    VARCHAR(16)  DEFAULT NULL,
+  `operator`     VARCHAR(32)  DEFAULT NULL,
+  `detail`       VARCHAR(1024) DEFAULT NULL,
+  `success`      TINYINT(1)   NOT NULL DEFAULT 1,
+  `failure_reason` VARCHAR(1024) DEFAULT NULL,
+  `created_at`   DATETIME     NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_order_event_time` (`order_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='异常处置操作轨迹';
+
+-- ---------------- 10. 灰渣与渗滤液台账 ----------------
 DROP TABLE IF EXISTS `ash_residue`;
 CREATE TABLE `ash_residue` (
   `id`                  BIGINT       NOT NULL AUTO_INCREMENT,

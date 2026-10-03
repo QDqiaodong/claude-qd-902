@@ -58,10 +58,13 @@ public class FurnacePayload {
         private BigDecimal kilnLengthM;
         private BigDecimal kilnTailTempC;
 
-        /** 炉膛温度是否达标（≥850℃ 且停留 ≥2s） */
         private Boolean combustionQualified;
         /** 不达标项明细 */
         private List<String> unqualifiedItems;
+        /** 有效异常工况处置单 */
+        private AbnormalOrderPayload.VO activeAbnormalOrder;
+        /** 当前投料是否被异常工况联锁冻结 */
+        private Boolean feedingLocked;
         /** 按炉型给出的专属参数键值对（前端直接遍历渲染） */
         private Map<String, Object> extraParams;
 
@@ -360,6 +363,22 @@ public class FurnacePayload {
 
         public void setUnqualifiedItems(List<String> unqualifiedItems) {
             this.unqualifiedItems = unqualifiedItems;
+        }
+
+        public AbnormalOrderPayload.VO getActiveAbnormalOrder() {
+            return activeAbnormalOrder;
+        }
+
+        public void setActiveAbnormalOrder(AbnormalOrderPayload.VO activeAbnormalOrder) {
+            this.activeAbnormalOrder = activeAbnormalOrder;
+        }
+
+        public Boolean getFeedingLocked() {
+            return feedingLocked;
+        }
+
+        public void setFeedingLocked(Boolean feedingLocked) {
+            this.feedingLocked = feedingLocked;
         }
 
         public Map<String, Object> getExtraParams() {

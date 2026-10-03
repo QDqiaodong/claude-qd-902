@@ -35,6 +35,11 @@
             </div>
           </div>
 
+          <div v-if="f.feedingLocked" class="feed-lock">
+            <span class="wp-tag danger">投料冻结</span>
+            <span>{{ f.activeAbnormalOrder ? f.activeAbnormalOrder.orderNo : '历史关闭单保持冻结' }}</span>
+          </div>
+
           <div class="unqualified" v-if="!f.combustionQualified">
             <span class="wp-tag danger">未达标</span>
             <span v-for="item in f.unqualifiedItems" :key="item" class="uq-item">{{ item }}</span>
@@ -59,7 +64,9 @@
             <el-button size="small" type="success" plain @click="run(f, 'START')">启炉</el-button>
             <el-button size="small" type="primary" @click="run(f, 'STABILIZE')">稳燃</el-button>
             <el-button size="small" type="warning" plain @click="run(f, 'STOP')">停炉</el-button>
-            <el-button size="small" @click="judge(f)">达标判定</el-button>
+            <el-button size="small" @click="judge(f)">达标判定/触发</el-button>
+            <el-button size="small" type="danger" plain @click="openManualOrder(f)">处置单</el-button>
+            <el-button size="small" type="info" text @click="goOrders">处置列表</el-button>
           </div>
         </div>
       </div>
@@ -214,6 +221,20 @@
       </div>
     </section>
 
+    <!-- ===== 人工处置单弹窗 ===== -->
+    <el-dialog v-model="manualOrderDialog" :title="'人工发起异常处置 · ' + manualOrder.furnaceCode" width="500px">
+      <el-form :model="manualOrder" label-width="92px">
+        <el-form-item label="负责人"><el-input v-model="manualOrder.ownerName" placeholder="负责人姓名" /></el-form-item>
+        <el-form-item label="异常原因">
+          <el-input v-model="manualOrder.reason" type="textarea" :rows="4" placeholder="描述人工确认的异常工况" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="manualOrderDialog = false">取消</el-button>
+        <el-button type="danger" :loading="manualSubmitting" @click="submitManualOrder">发起并冻结投料</el-button>
+      </template>
+    </el-dialog>
+
     <!-- ===== 锅炉工况弹窗 ===== -->
     <el-dialog v-model="boilerDialog" title="调整余热锅炉蒸汽工况" width="460px">
       <el-form :model="boilerForm" label-width="100px">
@@ -254,7 +275,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { furnaceApi, powerApi } from '../api'
+import { furnaceApi, powerApi, abnormalOrderApi } from '../api'
+import router from '../router'
 
 const furnaces = ref([])
 const typeStats = ref([])
@@ -266,6 +288,9 @@ const powerDict = ref({})
 
 const boilerDialog = ref(false)
 const genDialog = ref(false)
+const manualOrderDialog = ref(false)
+const manualSubmitting = ref(false)
+const manualOrder = reactive({ furnaceCode: '', ownerName: '', reason: '' })
 const boilerForm = reactive({ boilerNo: '', steamPressureMpa: 4, steamTempC: 400, evaporationTph: 70, status: 'RUNNING' })
 const genForm = reactive({ unitNo: '', capacityMw: 25, generationKwh: 15000000, gridKwh: 12500000, runningHours: 720 })
 
@@ -351,11 +376,42 @@ async function run(f, action) {
 async function judge(f) {
   try {
     const res = await furnaceApi.judge(f.furnaceCode)
-    ElMessage.success(res.data.message)
+    if (res.data.qualified) ElMessage.success(res.data.message)
+    else ElMessage.warning(res.data.message)
     await load()
   } catch (e) {
     ElMessage.error(e.message)
   }
+}
+
+function openManualOrder(f) {
+  manualOrder.furnaceCode = f.furnaceCode
+  manualOrder.ownerName = ''
+  manualOrder.reason = (f.unqualifiedItems || []).join('；')
+  manualOrderDialog.value = true
+}
+
+async function submitManualOrder() {
+  if (!manualOrder.ownerName || !manualOrder.reason) {
+    ElMessage.error('负责人和异常原因不能为空')
+    return
+  }
+  manualSubmitting.value = true
+  try {
+    await abnormalOrderApi.manual({ ...manualOrder })
+    ElMessage.success('已发起处置单并冻结后续投料')
+    manualOrderDialog.value = false
+    await load()
+    router.push('/abnormal').catch(() => {})
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    manualSubmitting.value = false
+  }
+}
+
+function goOrders() {
+  router.push('/abnormal').catch(() => {})
 }
 
 function openBoiler(b) {
@@ -538,6 +594,19 @@ onMounted(load)
   font-size: 9px;
   color: var(--wp-warn);
   white-space: nowrap;
+}
+
+.feed-lock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(239, 83, 80, 0.1);
+  border: 1px solid rgba(239, 83, 80, 0.3);
+  color: #ffb4b0;
+  font-size: 11px;
 }
 
 .unqualified {

@@ -158,6 +158,17 @@ public final class Dict {
             "MAJOR", "较重",
             "SEVERE", "严重");
 
+    // ---------------- 异常工况处置单 ----------------
+    public static final List<String> ABNORMAL_ORDER_STATUSES = List.of(
+            "PENDING", "PROCESSING", "REVIEWING", "RECOVERED", "CLOSED");
+
+    private static final Map<String, String> ABNORMAL_ORDER_STATUS_NAME = Map.of(
+            "PENDING", "待处置",
+            "PROCESSING", "处置中",
+            "REVIEWING", "待复核",
+            "RECOVERED", "已恢复",
+            "CLOSED", "已关闭");
+
     // ---------------- 灰渣去向 ----------------
     public static final List<String> ASH_DISPOSAL = List.of(
             "填埋场专区填埋", "水泥窑协同处置", "危废刚性填埋场", "综合利用制砖");
@@ -287,6 +298,14 @@ public final class Dict {
 
     public static String alarmLevelName(String level) {
         return level == null ? "" : ALARM_LEVEL_NAME.getOrDefault(level, level);
+    }
+
+    public static boolean isValidAbnormalOrderStatus(String status) {
+        return status != null && ABNORMAL_ORDER_STATUS_NAME.containsKey(status);
+    }
+
+    public static String abnormalOrderStatusName(String status) {
+        return status == null ? "" : ABNORMAL_ORDER_STATUS_NAME.getOrDefault(status, status);
     }
 
     /** 按超标倍率给出告警等级：≥2 倍严重，≥1.2 倍较重，其余一般 */

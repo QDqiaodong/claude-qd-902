@@ -54,6 +54,24 @@ export const furnaceApi = {
   logs: (code) => get('/incinerators/logs', { furnaceCode: code })
 }
 
+export const abnormalOrderApi = {
+  list: (status) => get('/abnormal-orders', { status }),
+  detail: (id) => get(`/abnormal-orders/${id}`),
+  dict: () => get('/abnormal-orders/dict'),
+  scanSevere: () => post('/abnormal-orders/scan-severe', {}),
+  active: (furnaceCode) => get(`/abnormal-orders/furnace/${furnaceCode}/active`),
+  evaluate: (furnaceCode) => get(`/abnormal-orders/furnace/${furnaceCode}/evaluate`),
+  manual: (data) => post('/abnormal-orders/manual', data),
+  start: (id, data) => post(`/abnormal-orders/${id}/start`, data),
+  measures: (id, data) => post(`/abnormal-orders/${id}/measures`, data),
+  requestReview: (id, data) => post(`/abnormal-orders/${id}/review-request`, data),
+  readiness: (id) => get(`/abnormal-orders/${id}/recovery-readiness`),
+  markDataMissing: (id, alarmId, missing, operator = '值班员') =>
+    post(`/abnormal-orders/${id}/alarms/${alarmId}/data-missing?missing=${missing}&operator=${encodeURIComponent(operator)}`, {}),
+  review: (id, data) => post(`/abnormal-orders/${id}/review`, data),
+  close: (id, data) => post(`/abnormal-orders/${id}/close`, data)
+}
+
 export const powerApi = {
   boilers: () => get('/power/boilers'),
   turbines: () => get('/power/turbines'),

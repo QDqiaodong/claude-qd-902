@@ -5,12 +5,15 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.waste.power.domain.FluidizedBed;
 import com.waste.power.domain.GrateFurnace;
 import com.waste.power.domain.Incinerator;
+
+import jakarta.persistence.LockModeType;
 
 /**
  * 焚烧炉数据访问：单表继承 + @DiscriminatorFormula，子类由公式判别。
@@ -33,6 +36,10 @@ public interface IncineratorRepository extends JpaRepository<Incinerator, Long> 
     /** 【treat()】访问子类 FluidizedBed 的专属字段：流化风速不低于给定值的流化床 */
     @Query("select i from Incinerator i where treat(i as FluidizedBed).fluidizingAirSpeedMs >= :speed")
     List<Incinerator> findHighSpeedFluidizedBeds(@Param("speed") BigDecimal speed);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Incinerator i where i.furnaceCode = :furnaceCode")
+    Optional<Incinerator> findByFurnaceCodeForUpdate(@Param("furnaceCode") String furnaceCode);
 
     Optional<Incinerator> findByFurnaceCode(String furnaceCode);
 }

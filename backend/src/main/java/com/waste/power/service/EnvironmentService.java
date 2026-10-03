@@ -46,14 +46,17 @@ public class EnvironmentService {
     private final AshResidueRepository ashRepository;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final AbnormalOrderService abnormalOrderService;
 
     public EnvironmentService(EmissionRecordRepository emissionRepository, EnvAlarmRepository alarmRepository,
-            AshResidueRepository ashRepository, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
+            AshResidueRepository ashRepository, StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+            AbnormalOrderService abnormalOrderService) {
         this.emissionRepository = emissionRepository;
         this.alarmRepository = alarmRepository;
         this.ashRepository = ashRepository;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+        this.abnormalOrderService = abnormalOrderService;
     }
 
     @Transactional(readOnly = true)
@@ -123,7 +126,10 @@ public class EnvironmentService {
         EmissionRecord saved = emissionRepository.save(record);
 
         if (exceeded) {
-            createAlarm(saved);
+            EnvAlarm alarm = createAlarm(saved);
+            if ("SEVERE".equals(alarm.getAlarmLevel())) {
+                abnormalOrderService.registerSevereAlarm(alarm);
+            }
         }
         evictDashboard();
         return EmissionPayload.VO.from(saved);

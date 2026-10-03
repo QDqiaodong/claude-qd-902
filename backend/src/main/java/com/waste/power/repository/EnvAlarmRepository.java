@@ -17,4 +17,8 @@ public interface EnvAlarmRepository extends JpaRepository<EnvAlarm, Long> {
     List<EnvAlarm> findTop20ByHandledFalseOrderByAlarmTimeDesc();
 
     Optional<EnvAlarm> findByAlarmNo(String alarmNo);
+
+    List<EnvAlarm> findByAlarmLevelAndStackCodeOrderByAlarmTimeDesc(String alarmLevel, String stackCode);
+
+    List<EnvAlarm> findByAlarmLevelOrderByAlarmTimeDesc(String alarmLevel);
 }

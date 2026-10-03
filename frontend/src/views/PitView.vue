@@ -95,8 +95,17 @@
               </el-form-item>
               <el-form-item label="目标炉号">
                 <el-select v-model="feed.targetFurnaceCode">
-                  <el-option v-for="f in dict.furnaceCodes || []" :key="f" :label="f" :value="f" />
+                  <el-option
+                    v-for="f in furnaceOptions"
+                    :key="f.code"
+                    :label="f.locked ? `${f.code}（投料冻结）` : f.code"
+                    :value="f.code"
+                    :disabled="f.locked"
+                  />
                 </el-select>
+                <div v-if="selectedFurnaceLocked" class="freeze-tip">
+                  目标炉投料已被异常工况处置单冻结，<el-button link type="primary" @click="router.push('/abnormal')">查看处置闭环</el-button>
+                </div>
               </el-form-item>
               <el-form-item>
                 <el-button type="primary" @click="doFeed">执行投料</el-button>
@@ -187,6 +196,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { pitApi } from '../api'
+import router from '../router'
 
 const pits = ref([])
 const dict = ref({})
@@ -224,6 +234,16 @@ const bays = computed(() =>
     }
   })
 )
+
+const furnaceOptions = computed(() =>
+  (dict.value.furnaceCodes || []).map((code) => ({
+    code,
+    locked: Boolean(dict.value.feedingLocks && dict.value.feedingLocks[code])
+  }))
+)
+const selectedFurnaceLocked = computed(() => furnaceOptions.value.some(
+  (f) => f.code === feed.targetFurnaceCode && f.locked
+))
 
 function strokeOf(pit) {
   if (pit.status === 'FULL') return '#ef5350'
@@ -296,7 +316,8 @@ async function doFeed() {
     const res = await pitApi.feed(feed.pitNo, {
       grabNo: feed.grabNo,
       feedTon: feed.feedTon,
-      targetFurnaceCode: feed.targetFurnaceCode
+      targetFurnaceCode: feed.targetFurnaceCode,
+      operator: '中控值班'
     })
     ElMessage.success(res.message || '投料成功')
     await load()
@@ -428,6 +449,13 @@ onMounted(load)
 .pit-chip:hover {
   border-color: var(--wp-accent);
   color: #eaf6fc;
+}
+
+.freeze-tip {
+  margin-top: -12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #ffb4b0;
 }
 
 .feed-grid {

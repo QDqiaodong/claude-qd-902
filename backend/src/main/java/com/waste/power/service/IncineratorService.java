@@ -34,10 +34,13 @@ public class IncineratorService {
 
     private final IncineratorRepository incineratorRepository;
     private final FurnaceRunLogRepository runLogRepository;
+    private final AbnormalOrderService abnormalOrderService;
 
-    public IncineratorService(IncineratorRepository incineratorRepository, FurnaceRunLogRepository runLogRepository) {
+    public IncineratorService(IncineratorRepository incineratorRepository, FurnaceRunLogRepository runLogRepository,
+            AbnormalOrderService abnormalOrderService) {
         this.incineratorRepository = incineratorRepository;
         this.runLogRepository = runLogRepository;
+        this.abnormalOrderService = abnormalOrderService;
     }
 
     /**
@@ -46,32 +49,26 @@ public class IncineratorService {
     @Transactional(readOnly = true)
     public List<FurnacePayload.VO> list() {
         return incineratorRepository.findAll().stream()
-                .map(this::toVO)
+                .map(furnace -> enrich(toVO(furnace)))
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public FurnacePayload.VO get(String furnaceCode) {
-        return toVO(requireFurnace(furnaceCode));
+        return enrich(toVO(requireFurnace(furnaceCode)));
     }
 
     /**
-     * 燃烧工况达标判定：炉膛温度 ≥850℃ 且烟气停留 ≥2s，否则抛出具体不达标项
+     * 燃烧工况判定：炉膛温度 ≥850℃ 且烟气停留 ≥2s；异常时形成处置单、取证并冻结投料。
      */
     public Map<String, Object> judge(String furnaceCode) {
-        Incinerator furnace = requireFurnace(furnaceCode);
-        List<String> items = unqualifiedItems(furnace);
-        if (!items.isEmpty()) {
-            throw new BizException("炉号 " + furnace.getFurnaceCode() + " 燃烧工况未达标：" + String.join("；", items));
+        Map<String, Object> result = abnormalOrderService.registerCombustionIfNeeded(furnaceCode, "AUTO_COMBUSTION", "中控值班");
+        if (Boolean.TRUE.equals(result.get("qualified"))) {
+            Incinerator furnace = requireFurnace(furnaceCode);
+            furnace.setCombustionStatus("STABLE");
+            incineratorRepository.save(furnace);
         }
-        furnace.setCombustionStatus("STABLE");
-        Incinerator saved = incineratorRepository.save(furnace);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("furnaceCode", saved.getFurnaceCode());
-        result.put("qualified", true);
-        result.put("message", "炉号 " + saved.getFurnaceCode() + " 炉膛温度 "
-                + saved.getFurnaceTempC() + "℃、烟气停留 " + saved.getFlueGasResidenceS()
-                + "s，判定为达标燃烧，状态置为稳燃");
+        result.put("furnace", toVO(requireFurnace(furnaceCode)));
         return result;
     }
 
@@ -84,28 +81,30 @@ public class IncineratorService {
         if (!Dict.isValidFurnaceAction(action)) {
             throw new BizException("启停炉动作不合法：" + action + "（应为 START / STABILIZE / STOP）");
         }
-        if (request.getFurnaceTempC() != null) {
-            furnace.setFurnaceTempC(request.getFurnaceTempC());
-        }
         BigDecimal processTon = request.getProcessTon();
         BigDecimal runHours = request.getRunHours();
         LocalDateTime now = LocalDateTime.now();
 
         switch (action) {
             case "START" -> {
+                applySubmittedTemperature(furnace, request.getFurnaceTempC());
                 furnace.setCombustionStatus("STARTING");
                 furnace.setLastStartTime(now);
             }
             case "STABILIZE" -> {
-                // 稳燃必须先满足达标判定条件
-                List<String> items = unqualifiedItems(furnace);
-                if (!items.isEmpty()) {
+                // 用本次提交参数独立触发异常闭环；即使稳燃动作被拒绝，取证与冻结也已提交
+                Map<String, Object> check = abnormalOrderService.registerCombustionIfNeeded(
+                        furnace.getFurnaceCode(), "AUTO_COMBUSTION", request.getOperator(),
+                        request.getFurnaceTempC(), null);
+                if (!Boolean.TRUE.equals(check.get("qualified"))) {
                     throw new BizException("炉号 " + furnace.getFurnaceCode() + " 不允许判定为达标燃烧："
-                            + String.join("；", items));
+                            + String.valueOf(check.get("message")));
                 }
+                applySubmittedTemperature(furnace, request.getFurnaceTempC());
                 furnace.setCombustionStatus("STABLE");
             }
             case "STOP" -> {
+                applySubmittedTemperature(furnace, request.getFurnaceTempC());
                 furnace.setCombustionStatus("SHUTDOWN");
             }
             default -> throw new BizException("启停炉动作不合法：" + action);
@@ -171,7 +170,7 @@ public class IncineratorService {
      */
     @Transactional(readOnly = true)
     public List<FurnacePayload.VO> fastGrateFurnaces(BigDecimal speed) {
-        return incineratorRepository.findFastGrateFurnaces(speed).stream().map(this::toVO).toList();
+        return incineratorRepository.findFastGrateFurnaces(speed).stream().map(this::toVO).map(this::enrich).toList();
     }
 
     @Transactional(readOnly = true)
@@ -204,9 +203,25 @@ public class IncineratorService {
 
     // ---------------- 内部方法 ----------------
 
+    private void applySubmittedTemperature(Incinerator furnace, BigDecimal submittedTempC) {
+        if (submittedTempC != null) {
+            furnace.setFurnaceTempC(submittedTempC);
+        }
+    }
+
     private FurnacePayload.VO toVO(Incinerator furnace) {
         List<String> items = unqualifiedItems(furnace);
         return FurnacePayload.VO.from(furnace, items.isEmpty(), items);
+    }
+
+    private FurnacePayload.VO enrich(FurnacePayload.VO vo) {
+        abnormalOrderService.activeForFurnace(vo.getFurnaceCode()).ifPresent(vo::setActiveAbnormalOrder);
+        boolean activeLocked = vo.getActiveAbnormalOrder() != null
+                && Boolean.TRUE.equals(vo.getActiveAbnormalOrder().getFeedingLocked());
+        boolean closedFrozen = vo.getActiveAbnormalOrder() == null
+                && abnormalOrderService.hasClosedFrozenOrder(vo.getFurnaceCode());
+        vo.setFeedingLocked(activeLocked || closedFrozen);
+        return vo;
     }
 
     private List<String> unqualifiedItems(Incinerator furnace) {
