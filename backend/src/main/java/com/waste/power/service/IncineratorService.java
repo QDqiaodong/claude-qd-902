@@ -34,10 +34,13 @@ public class IncineratorService {
 
     private final IncineratorRepository incineratorRepository;
     private final FurnaceRunLogRepository runLogRepository;
+    private final AbnormalDisposalService disposalService;
 
-    public IncineratorService(IncineratorRepository incineratorRepository, FurnaceRunLogRepository runLogRepository) {
+    public IncineratorService(IncineratorRepository incineratorRepository, FurnaceRunLogRepository runLogRepository,
+            AbnormalDisposalService disposalService) {
         this.incineratorRepository = incineratorRepository;
         this.runLogRepository = runLogRepository;
+        this.disposalService = disposalService;
     }
 
     /**
@@ -56,13 +59,19 @@ public class IncineratorService {
     }
 
     /**
-     * 燃烧工况达标判定：炉膛温度 ≥850℃ 且烟气停留 ≥2s，否则抛出具体不达标项
+     * 燃烧工况达标判定：炉膛温度 ≥850℃ 且烟气停留 ≥2s，否则抛出具体不达标项。
+     * 不达标即自动触发异常工况处置单（快照 + 冻结投料），达标判定本身不解除任何处置联锁
+     * （解冻必须由另一名复核人员走复核恢复）。
      */
     public Map<String, Object> judge(String furnaceCode) {
         Incinerator furnace = requireFurnace(furnaceCode);
         List<String> items = unqualifiedItems(furnace);
         if (!items.isEmpty()) {
-            throw new BizException("炉号 " + furnace.getFurnaceCode() + " 燃烧工况未达标：" + String.join("；", items));
+            // 自动触发：独立事务建单，不影响本次判定报错；同炉已有有效单时只追加/合并，不重复冻结
+            disposalService.signalCombustionAbnormal(furnaceCode,
+                    new ArrayList<>(items).stream().map(it -> "燃烧判定不达标：" + it).toList());
+            throw new BizException("炉号 " + furnace.getFurnaceCode() + " 燃烧工况未达标：" + String.join("；", items)
+                    + "；已自动开立异常工况处置单并冻结该炉投料");
         }
         furnace.setCombustionStatus("STABLE");
         Incinerator saved = incineratorRepository.save(furnace);
@@ -87,6 +96,9 @@ public class IncineratorService {
         if (request.getFurnaceTempC() != null) {
             furnace.setFurnaceTempC(request.getFurnaceTempC());
         }
+        if (request.getFlueGasResidenceS() != null) {
+            furnace.setFlueGasResidenceS(request.getFlueGasResidenceS());
+        }
         BigDecimal processTon = request.getProcessTon();
         BigDecimal runHours = request.getRunHours();
         LocalDateTime now = LocalDateTime.now();
@@ -100,8 +112,11 @@ public class IncineratorService {
                 // 稳燃必须先满足达标判定条件
                 List<String> items = unqualifiedItems(furnace);
                 if (!items.isEmpty()) {
+                    disposalService.signalCombustionAbnormal(furnaceCode,
+                            items.stream().map(it -> "稳燃判定不达标：" + it).toList(),
+                            furnace.getFurnaceTempC(), furnace.getFlueGasResidenceS());
                     throw new BizException("炉号 " + furnace.getFurnaceCode() + " 不允许判定为达标燃烧："
-                            + String.join("；", items));
+                            + String.join("；", items) + "；已自动开立异常工况处置单并冻结该炉投料");
                 }
                 furnace.setCombustionStatus("STABLE");
             }

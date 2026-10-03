@@ -14,6 +14,8 @@ import java.util.Map;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.waste.power.common.BizException;
@@ -46,14 +48,17 @@ public class EnvironmentService {
     private final AshResidueRepository ashRepository;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final AbnormalDisposalService disposalService;
 
     public EnvironmentService(EmissionRecordRepository emissionRepository, EnvAlarmRepository alarmRepository,
-            AshResidueRepository ashRepository, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
+            AshResidueRepository ashRepository, StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+            AbnormalDisposalService disposalService) {
         this.emissionRepository = emissionRepository;
         this.alarmRepository = alarmRepository;
         this.ashRepository = ashRepository;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+        this.disposalService = disposalService;
     }
 
     @Transactional(readOnly = true)
@@ -123,7 +128,22 @@ public class EnvironmentService {
         EmissionRecord saved = emissionRepository.save(record);
 
         if (exceeded) {
-            createAlarm(saved);
+            EnvAlarm alarm = createAlarm(saved);
+            // 同炉严重排放告警：排放登记事务提交后再自动建处置单（独立事务），
+            // 保证告警已落库、证据外键有效；后到告警由处置服务负责合并/反弹，不依赖已处理标记
+            if ("SEVERE".equals(alarm.getAlarmLevel())) {
+                Long alarmId = alarm.getId();
+                if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            disposalService.signalSevereAlarm(alarmId);
+                        }
+                    });
+                } else {
+                    disposalService.signalSevereAlarm(alarmId);
+                }
+            }
         }
         evictDashboard();
         return EmissionPayload.VO.from(saved);

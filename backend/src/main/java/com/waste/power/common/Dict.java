@@ -162,6 +162,40 @@ public final class Dict {
     public static final List<String> ASH_DISPOSAL = List.of(
             "填埋场专区填埋", "水泥窑协同处置", "危废刚性填埋场", "综合利用制砖");
 
+    // ---------------- 异常工况处置单 ----------------
+    /** 处置单状态：待处置 → 处置中 → 待复核 → 已恢复 → 已关闭 */
+    public static final List<String> DISPOSAL_STATUS = List.of(
+            "PENDING", "HANDLING", "REVIEWING", "RECOVERED", "CLOSED");
+
+    private static final Map<String, String> DISPOSAL_STATUS_NAME = Map.of(
+            "PENDING", "待处置",
+            "HANDLING", "处置中",
+            "REVIEWING", "待复核",
+            "RECOVERED", "已恢复",
+            "CLOSED", "已关闭");
+
+    /** 触发来源 */
+    public static final List<String> DISPOSAL_SOURCES = List.of("AUTO", "MANUAL");
+
+    private static final Map<String, String> DISPOSAL_SOURCE_NAME = Map.of(
+            "AUTO", "自动触发",
+            "MANUAL", "人工发起");
+
+    /** 告警数据缺失时的明确选择 */
+    public static final List<String> MISSING_CHOICES = List.of("WAIT_FREEZE", "CLOSE_KEEP_FROZEN");
+
+    private static final Map<String, String> MISSING_CHOICE_NAME = Map.of(
+            "WAIT_FREEZE", "继续冻结等待补齐",
+            "CLOSE_KEEP_FROZEN", "记录理由后关闭处置但保持投料冻结");
+
+    /** 证据挂接来源 */
+    private static final Map<String, String> EVIDENCE_BIND_NAME = Map.of(
+            "SNAPSHOT", "建单快照",
+            "MERGED", "并发合并");
+
+    /** 严重告警参与处置联锁的回看窗口 h（只统计冻结时点之后且窗口内的未解除严重告警） */
+    public static final long SEVERE_ALARM_LOOKBACK_HOURS = 24;
+
     // ---------------- 业务规则阈值 ----------------
     /** 炉膛温度达标下限 ℃（GB 18485：不低于 850℃） */
     public static final BigDecimal MIN_FURNACE_TEMP_C = bd(850);
@@ -287,6 +321,22 @@ public final class Dict {
 
     public static String alarmLevelName(String level) {
         return level == null ? "" : ALARM_LEVEL_NAME.getOrDefault(level, level);
+    }
+
+    public static String disposalStatusName(String status) {
+        return status == null ? "" : DISPOSAL_STATUS_NAME.getOrDefault(status, status);
+    }
+
+    public static String disposalSourceName(String source) {
+        return source == null ? "" : DISPOSAL_SOURCE_NAME.getOrDefault(source, source);
+    }
+
+    public static String missingChoiceName(String choice) {
+        return choice == null ? "" : MISSING_CHOICE_NAME.getOrDefault(choice, choice);
+    }
+
+    public static String evidenceBindName(String bind) {
+        return bind == null ? "" : EVIDENCE_BIND_NAME.getOrDefault(bind, bind);
     }
 
     /** 按超标倍率给出告警等级：≥2 倍严重，≥1.2 倍较重，其余一般 */

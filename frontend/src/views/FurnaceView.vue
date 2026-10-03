@@ -15,6 +15,7 @@
               <span class="fcode mono">{{ f.furnaceCode }}</span>
               <span class="wp-tag primary">{{ f.furnaceTypeName }}</span>
               <span class="wp-tag" :class="statusTag(f)"><span class="wp-dot" :class="statusDot(f)"></span>{{ f.combustionStatusName }}</span>
+              <span v-if="frozenSet.has(f.furnaceCode)" class="wp-tag danger frozen-badge">⛔ 投料冻结 · 异常处置中</span>
             </div>
             <div class="head-right mono">{{ f.furnaceName }}</div>
           </div>
@@ -60,6 +61,10 @@
             <el-button size="small" type="primary" @click="run(f, 'STABILIZE')">稳燃</el-button>
             <el-button size="small" type="warning" plain @click="run(f, 'STOP')">停炉</el-button>
             <el-button size="small" @click="judge(f)">达标判定</el-button>
+            <el-button size="small" type="danger" plain @click="goDisposal(f)">处置单</el-button>
+          </div>
+          <div v-if="frozenSet.has(f.furnaceCode)" class="freeze-tip">
+            该炉存在未恢复的异常工况处置单，抓斗投料已联锁冻结；达标判定不会自动解冻，须由另一名复核人员复核恢复。
           </div>
         </div>
       </div>
@@ -254,7 +259,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { furnaceApi, powerApi } from '../api'
+import { furnaceApi, powerApi, disposalApi } from '../api'
 
 const furnaces = ref([])
 const typeStats = ref([])
@@ -263,6 +268,8 @@ const logs = ref([])
 const boilers = ref([])
 const turbines = ref([])
 const powerDict = ref({})
+const frozenFurnaces = ref([])
+const frozenSet = computed(() => new Set(frozenFurnaces.value || []))
 
 const boilerDialog = ref(false)
 const genDialog = ref(false)
@@ -317,14 +324,15 @@ function actionTag(action) {
 
 async function load() {
   try {
-    const [r1, r2, r3, r4, r5, r6, r7] = await Promise.all([
+    const [r1, r2, r3, r4, r5, r6, r7, r8] = await Promise.all([
       furnaceApi.list(),
       furnaceApi.statsByType(),
       furnaceApi.monthly(),
       furnaceApi.logs(),
       powerApi.boilers(),
       powerApi.turbines(),
-      powerApi.dict()
+      powerApi.dict(),
+      disposalApi.frozenFurnaces()
     ])
     furnaces.value = r1.data || []
     typeStats.value = r2.data || []
@@ -333,9 +341,15 @@ async function load() {
     boilers.value = r5.data || []
     turbines.value = r6.data || []
     powerDict.value = r7.data || {}
+    frozenFurnaces.value = r8.data || []
   } catch (e) {
     ElMessage.error(e.message)
   }
+}
+
+function goDisposal(f) {
+  window.history.pushState({}, '', '/disposal')
+  window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
 async function run(f, action) {
@@ -600,6 +614,20 @@ onMounted(load)
   display: flex;
   gap: 6px;
   margin-top: 8px;
+}
+
+.frozen-badge {
+  animation: wp-glow 1.1s ease-in-out infinite;
+}
+
+.freeze-tip {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #ffb4b0;
+  background: rgba(239, 83, 80, 0.09);
+  border: 1px solid rgba(239, 83, 80, 0.28);
 }
 
 /* 炉型统计 */

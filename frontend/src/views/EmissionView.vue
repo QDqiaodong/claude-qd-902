@@ -178,8 +178,12 @@
         <el-form-item label="监测时段">
           <el-input v-model="emission.periodLabel" placeholder="如 当日 18:00~24:00 时段" />
         </el-form-item>
-        <el-form-item label="排放口">
-          <el-input v-model="emission.stackCode" />
+        <el-form-item label="排放口（炉）">
+          <el-select v-model="emission.stackCode">
+            <el-option v-for="f in disposalFurnaces" :key="f.stackCode"
+              :label="`${f.stackCode} · ${f.furnaceCode} ${f.furnaceName}`" :value="f.stackCode" />
+          </el-select>
+          <div class="hint">严重告警（≥限值 2 倍）会按排放口归属同炉并自动冻结该炉投料。</div>
         </el-form-item>
         <el-form-item label="排放标记">
           <el-select v-model="emission.emissionFlag">
@@ -199,7 +203,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { envApi } from '../api'
+import { envApi, disposalApi } from '../api'
 
 const R = 88
 const CX = 110
@@ -213,13 +217,14 @@ const rank = ref([])
 const ashRecords = ref([])
 const gauges = ref([])
 const envDict = ref({})
+const disposalFurnaces = ref([])
 
 const emissionDialog = ref(false)
 const emission = reactive({
   indicatorCode: 'NOX',
   measuredValue: 200,
   periodLabel: '',
-  stackCode: 'STACK-01',
+  stackCode: 'STACK-F01',
   emissionFlag: 'NORMAL'
 })
 
@@ -300,11 +305,12 @@ function pct(rate) {
 
 async function load() {
   try {
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       envApi.dashboard(),
       envApi.alarms(),
       envApi.exceedRank(),
-      envApi.dict()
+      envApi.dict(),
+      disposalApi.dict()
     ])
     dash.value = r1.data || {}
     gauges.value = dash.value.gauges || []
@@ -312,6 +318,10 @@ async function load() {
     rank.value = dash.value.rank || []
     alarms.value = r2.data || []
     envDict.value = r4.data || {}
+    disposalFurnaces.value = (r5.data && r5.data.furnaces) || []
+    if (!disposalFurnaces.value.some((f) => f.stackCode === emission.stackCode) && disposalFurnaces.value.length) {
+      emission.stackCode = disposalFurnaces.value[0].stackCode
+    }
     if (!ash.disposalDest && envDict.value.ashDisposal && envDict.value.ashDisposal.length) {
       ash.disposalDest = envDict.value.ashDisposal[0]
     }

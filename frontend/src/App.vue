@@ -83,6 +83,7 @@ import IntakeView from './views/IntakeView.vue'
 import PitView from './views/PitView.vue'
 import FurnaceView from './views/FurnaceView.vue'
 import EmissionView from './views/EmissionView.vue'
+import DisposalView from './views/DisposalView.vue'
 
 // main.js 固定不改（未调用 app.use(router)），这里直接驱动 router 实例做导航与地址同步，
 // 页面切换由本地路径状态决定（不依赖 router 的内部注入）。
@@ -90,7 +91,8 @@ const VIEW_MAP = {
   '/intake': IntakeView,
   '/pit': PitView,
   '/furnace': FurnaceView,
-  '/emission': EmissionView
+  '/emission': EmissionView,
+  '/disposal': DisposalView
 }
 
 function normalizePath(path) {
@@ -132,6 +134,14 @@ const nodes = [
     ]
   },
   {
+    key: 'disposal', label: '异常工况处置', icon: 'shield', path: '/disposal',
+    subs: [
+      { label: '处置单列表', hash: '#sec-disposal-list' },
+      { label: '处置详情与证据轨迹', hash: '#sec-disposal-detail' },
+      { label: '恢复条件与投料联锁', hash: '#sec-condition' }
+    ]
+  },
+  {
     key: 'boiler', label: '余热锅炉', icon: 'steam', path: '/furnace',
     subs: [
       { label: '锅炉蒸汽工况', hash: '#sec-boiler' },
@@ -166,6 +176,7 @@ const icons = {
   truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1" y="7" width="13" height="9" rx="1"/><path d="M14 11h4l3 3v2h-7z"/><circle cx="5.5" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg>',
   pit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 5h18l-2.5 14H5.5z"/><path d="M6 14h12"/><path d="M9 5v9M15 5v9"/></svg>',
   flame: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2c4 5 6 7 6 11a6 6 0 0 1-12 0c0-3 2-4 3-6 1 2 2 2 2 0 0-2 1-3 1-5z"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/><path d="M8.5 12l2.5 2.5L16 9.5"/></svg>',
   steam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="11" width="16" height="10" rx="1.5"/><path d="M8 8c0-2 2-2 2-4M12 8c0-2 2-2 2-4M16 8c0-2 2-2 2-4"/></svg>',
   bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
   filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4h18l-7 8v8l-4-2v-6z"/></svg>',

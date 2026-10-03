@@ -12,4 +12,7 @@ import com.waste.power.domain.StoragePit;
 public interface StoragePitRepository extends JpaRepository<StoragePit, Long> {
 
     Optional<StoragePit> findByPitNo(String pitNo);
+
+    /** 处置单建立时按炉侧供料抓斗反查最近供料坑位，做供料抓斗快照 */
+    Optional<StoragePit> findFirstByGrabNo(String grabNo);
 }

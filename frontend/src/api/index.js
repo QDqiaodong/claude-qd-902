@@ -75,4 +75,19 @@ export const envApi = {
   registerAsh: (data) => post('/environment/ash', data)
 }
 
+export const disposalApi = {
+  list: (activeOnly = true) => get('/disposals', { activeOnly }),
+  detail: (id) => get(`/disposals/${id}`),
+  evidences: (id) => get(`/disposals/${id}/evidences`),
+  traces: (id) => get(`/disposals/${id}/traces`),
+  condition: (id) => get(`/disposals/${id}/condition`),
+  frozenFurnaces: () => get('/disposals/frozen-furnaces'),
+  dict: () => get('/disposals/dict'),
+  open: (data) => post('/disposals/open', data),
+  measure: (id, data) => post(`/disposals/${id}/measures`, data),
+  review: (id, data) => post(`/disposals/${id}/review`, data),
+  close: (id, data) => post(`/disposals/${id}/close`, data),
+  missingChoice: (id, data) => post(`/disposals/${id}/missing-choice`, data)
+}
+
 export default http

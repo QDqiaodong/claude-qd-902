@@ -26,10 +26,13 @@ public class StoragePitService {
 
     private final StoragePitRepository pitRepository;
     private final IncineratorRepository incineratorRepository;
+    private final AbnormalDisposalService disposalService;
 
-    public StoragePitService(StoragePitRepository pitRepository, IncineratorRepository incineratorRepository) {
+    public StoragePitService(StoragePitRepository pitRepository, IncineratorRepository incineratorRepository,
+            AbnormalDisposalService disposalService) {
         this.pitRepository = pitRepository;
         this.incineratorRepository = incineratorRepository;
+        this.disposalService = disposalService;
     }
 
     @Transactional(readOnly = true)
@@ -83,6 +86,8 @@ public class StoragePitService {
         if ("SHUTDOWN".equals(furnace.getCombustionStatus())) {
             throw new BizException("炉号 " + furnace.getFurnaceCode() + " 处于停炉状态，不允许投料");
         }
+        // 投料联锁：存在未恢复的异常工况处置单（含严重告警冻结、关闭但保持冻结）时一律拒绝
+        disposalService.assertFeedAllowed(request.getTargetFurnaceCode());
         BigDecimal stock = nvl(pit.getCurrentStockTon());
         if (stock.compareTo(feedTon) < 0) {
             throw new BizException("储坑 " + pit.getPitNo() + " 当前库存 " + stock.setScale(2, RoundingMode.HALF_UP)

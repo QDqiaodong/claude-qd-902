@@ -38,6 +38,8 @@ public class FurnacePayload {
         private BigDecimal runningHours;
         private LocalDateTime lastStartTime;
         private String grabNo;
+        /** 对应排放口（同炉严重告警归集依据） */
+        private String stackCode;
         private String remark;
 
         // 炉排炉专属
@@ -82,6 +84,7 @@ public class FurnacePayload {
             vo.runningHours = furnace.getRunningHours();
             vo.lastStartTime = furnace.getLastStartTime();
             vo.grabNo = furnace.getGrabNo();
+            vo.stackCode = furnace.getStackCode();
             vo.remark = furnace.getRemark();
             vo.combustionQualified = qualified;
             vo.unqualifiedItems = unqualifiedItems;
@@ -242,6 +245,14 @@ public class FurnacePayload {
             this.grabNo = grabNo;
         }
 
+        public String getStackCode() {
+            return stackCode;
+        }
+
+        public void setStackCode(String stackCode) {
+            this.stackCode = stackCode;
+        }
+
         public String getRemark() {
             return remark;
         }
@@ -376,6 +387,7 @@ public class FurnacePayload {
 
         private String action;
         private BigDecimal furnaceTempC;
+        private BigDecimal flueGasResidenceS;
         private BigDecimal processTon;
         private BigDecimal runHours;
         private String operator;
@@ -395,6 +407,14 @@ public class FurnacePayload {
 
         public void setFurnaceTempC(BigDecimal furnaceTempC) {
             this.furnaceTempC = furnaceTempC;
+        }
+
+        public BigDecimal getFlueGasResidenceS() {
+            return flueGasResidenceS;
+        }
+
+        public void setFlueGasResidenceS(BigDecimal flueGasResidenceS) {
+            this.flueGasResidenceS = flueGasResidenceS;
         }
 
         public BigDecimal getProcessTon() {

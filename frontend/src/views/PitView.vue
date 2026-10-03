@@ -95,11 +95,18 @@
               </el-form-item>
               <el-form-item label="目标炉号">
                 <el-select v-model="feed.targetFurnaceCode">
-                  <el-option v-for="f in dict.furnaceCodes || []" :key="f" :label="f" :value="f" />
+                  <el-option v-for="f in dict.furnaceCodes || []" :key="f" :label="f + (frozenSet.has(f) ? '（投料冻结中）' : '')" :value="f">
+                    <span>{{ f }}</span>
+                    <span v-if="frozenSet.has(f)" style="float:right;color:#ef5350;font-size:11px">⛔ 冻结</span>
+                  </el-option>
                 </el-select>
               </el-form-item>
+              <el-alert
+                v-if="feed.targetFurnaceCode && frozenSet.has(feed.targetFurnaceCode)"
+                type="error" :closable="false" show-icon class="feed-freeze-alert"
+                title="目标炉存在未恢复的异常工况处置单，投料已联锁冻结，执行会被拒绝；须另一名复核人员复核恢复后方可投料。" />
               <el-form-item>
-                <el-button type="primary" @click="doFeed">执行投料</el-button>
+                <el-button type="primary" :disabled="feed.targetFurnaceCode && frozenSet.has(feed.targetFurnaceCode)" @click="doFeed">执行投料</el-button>
               </el-form-item>
             </el-form>
           </div>
@@ -186,11 +193,13 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { pitApi } from '../api'
+import { pitApi, disposalApi } from '../api'
 
 const pits = ref([])
 const dict = ref({})
 const selected = ref(null)
+const frozenFurnaces = ref([])
+const frozenSet = computed(() => new Set(frozenFurnaces.value || []))
 
 const feed = reactive({ pitNo: '', grabNo: 'GRAB-01', feedTon: 25, targetFurnaceCode: '' })
 const unload = reactive({ pitNo: '', truckNo: '粤Q·A1283', unloadTon: 16, wasteCategory: 'OTHER' })
@@ -270,9 +279,10 @@ function pct(rate) {
 
 async function load() {
   try {
-    const [r1, r2] = await Promise.all([pitApi.list(), pitApi.dict()])
+    const [r1, r2, r3] = await Promise.all([pitApi.list(), pitApi.dict(), disposalApi.frozenFurnaces()])
     pits.value = r1.data || []
     dict.value = r2.data || {}
+    frozenFurnaces.value = r3.data || []
     if (!feed.pitNo && pits.value.length) feed.pitNo = pits.value[0].pitNo
     if (!unload.pitNo && pits.value.length) unload.pitNo = pits.value[1] ? pits.value[1].pitNo : pits.value[0].pitNo
     if (!feed.targetFurnaceCode && dict.value.furnaceCodes && dict.value.furnaceCodes.length) {

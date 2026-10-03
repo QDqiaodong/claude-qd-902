@@ -65,6 +65,7 @@ CREATE TABLE `incinerator` (
   `running_hours`          DECIMAL(10,1) DEFAULT NULL COMMENT '累计运行小时 h',
   `last_start_time`        DATETIME     DEFAULT NULL COMMENT '最近启炉时间',
   `grab_no`                VARCHAR(16)  DEFAULT NULL COMMENT '供料抓斗',
+  `stack_code`             VARCHAR(32)  DEFAULT NULL COMMENT '对应排放口编号（同炉排放告警据此归集）',
   `remark`                 VARCHAR(128) DEFAULT NULL,
   -- 子类：炉排炉 GrateFurnace
   `grate_speed_mh`         DECIMAL(6,2) DEFAULT NULL COMMENT '炉排速度 m/h',
@@ -199,6 +200,94 @@ CREATE TABLE `ash_residue` (
   KEY `idx_ash_date` (`record_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='灰渣与渗滤液台账';
 
+
+-- ---------------- 10. 异常工况处置单（炉况判定 / 同炉排放告警 / 储坑抓斗快照 → 冻结投料 → 复核恢复 闭环） ----------------
+DROP TABLE IF EXISTS `abnormal_disposal`;
+CREATE TABLE `abnormal_disposal` (
+  `id`                     BIGINT       NOT NULL AUTO_INCREMENT,
+  `disposal_no`            VARCHAR(40)  NOT NULL COMMENT '处置单编号',
+  `furnace_code`           VARCHAR(32)  NOT NULL COMMENT '炉号',
+  `furnace_name`           VARCHAR(64)  DEFAULT NULL COMMENT '炉名称（快照）',
+  `status`                 VARCHAR(16)  NOT NULL COMMENT '状态 PENDING/HANDLING/REVIEWING/RECOVERED/CLOSED',
+  `active_once`           VARCHAR(32)  GENERATED ALWAYS AS (CASE WHEN `status` = 'CLOSED' THEN NULL ELSE `furnace_code` END) STORED COMMENT '未关闭处置单同炉唯一占用（关闭后为 NULL，不占名额）',
+  `trigger_source`         VARCHAR(16)  NOT NULL COMMENT '首发来源 AUTO/MANUAL',
+  `trigger_reasons`        VARCHAR(512) DEFAULT NULL COMMENT '触发原因（不达标项等，JSON 数组）',
+  -- 炉况快照（建立时冻结，不改动任何已完成的运行记录）
+  `snapshot_furnace_temp_c`  DECIMAL(8,1)  DEFAULT NULL COMMENT '快照炉膛温度 ℃',
+  `snapshot_residence_s`     DECIMAL(6,2)  DEFAULT NULL COMMENT '快照烟气停留 s',
+  `snapshot_co_ppm`          DECIMAL(8,2)  DEFAULT NULL COMMENT '快照 CO ppm',
+  `snapshot_combustion`      VARCHAR(16)   DEFAULT NULL COMMENT '快照燃烧状态',
+  `snapshot_daily_ton`       DECIMAL(10,2) DEFAULT NULL COMMENT '快照当日入炉量 t',
+  `snapshot_stack_code`      VARCHAR(32)   DEFAULT NULL COMMENT '快照排放口',
+  -- 供料抓斗快照（炉侧抓斗 + 最近向该炉供料的坑位抓斗）
+  `snapshot_grab_no`         VARCHAR(16)   DEFAULT NULL COMMENT '炉侧供料抓斗',
+  `snapshot_pit_no`          VARCHAR(16)   DEFAULT NULL COMMENT '最近供料坑位',
+  `snapshot_pit_grab_no`     VARCHAR(16)   DEFAULT NULL COMMENT '坑位抓斗编号',
+  `snapshot_pit_stock_ton`   DECIMAL(10,2) DEFAULT NULL COMMENT '快照坑位库存 t',
+  -- 投料联锁
+  `feed_frozen`            TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '是否冻结投料',
+  `frozen_time`            DATETIME     DEFAULT NULL COMMENT '投料冻结时间',
+  `unfrozen_time`          DATETIME     DEFAULT NULL COMMENT '投料解冻时间',
+  -- 人工处置
+  `owner_name`             VARCHAR(32)  DEFAULT NULL COMMENT '处置负责人',
+  `measure_note`           VARCHAR(512) DEFAULT NULL COMMENT '处置措施记录',
+  `handled_time`           DATETIME     DEFAULT NULL COMMENT '开始处置时间',
+  `review_request_time`    DATETIME     DEFAULT NULL COMMENT '申请复核时间',
+  -- 复核恢复（必须由另一名复核人员执行）
+  `reviewer_name`          VARCHAR(32)  DEFAULT NULL COMMENT '复核人员（不得与负责人为同一人）',
+  `review_note`            VARCHAR(512) DEFAULT NULL COMMENT '复核意见',
+  `recover_furnace_temp_c` DECIMAL(8,1) DEFAULT NULL COMMENT '恢复时炉膛温度 ℃',
+  `recover_residence_s`    DECIMAL(6,2) DEFAULT NULL COMMENT '恢复时烟气停留 s',
+  -- 告警数据暂不可用时的明确选择
+  `alarm_data_status`      VARCHAR(16)  NOT NULL DEFAULT 'AVAILABLE' COMMENT '告警数据 AVAILABLE/UNAVAILABLE',
+  `missing_choice`         VARCHAR(32)  DEFAULT NULL COMMENT '缺失选择 WAIT_FREEZE/CLOSE_KEEP_FROZEN',
+  `missing_reason`         VARCHAR(255) DEFAULT NULL COMMENT '数据缺失处置理由',
+  `missing_decided_by`     VARCHAR(32)  DEFAULT NULL COMMENT '缺失选择决策人',
+  `missing_decided_time`   DATETIME     DEFAULT NULL COMMENT '缺失选择时间',
+  -- 乐观锁：重复点击 / 过期版本提交 / 两人同时复核 防误放行
+  `version`                INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `close_time`             DATETIME     DEFAULT NULL COMMENT '关闭时间',
+  `remark`                 VARCHAR(255) DEFAULT NULL,
+  `create_time`            DATETIME     NOT NULL COMMENT '创建时间',
+  `update_time`            DATETIME     NOT NULL COMMENT '最近更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_disposal_no` (`disposal_no`),
+  -- 同炉未恢复（未关闭）前只能存在一张有效处置单：关闭态不占名额
+  UNIQUE KEY `uk_active_per_furnace` (`furnace_code`, `active_once`),
+  KEY `idx_disposal_status` (`status`),
+  KEY `idx_disposal_furnace` (`furnace_code`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='异常工况处置单';
+
+-- 处置单与环保告警的多对多证据关联（并发到达的后到告警挂到既有处置单，不丢失）
+DROP TABLE IF EXISTS `abnormal_disposal_alarm`;
+CREATE TABLE `abnormal_disposal_alarm` (
+  `id`            BIGINT      NOT NULL AUTO_INCREMENT,
+  `disposal_id`   BIGINT      NOT NULL COMMENT '处置单 id',
+  `alarm_id`      BIGINT      NOT NULL COMMENT '环保告警 id',
+  `bind_source`   VARCHAR(16) NOT NULL DEFAULT 'SNAPSHOT' COMMENT '证据来源 SNAPSHOT/MERGED',
+  `bind_time`     DATETIME    NOT NULL COMMENT '挂接时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_disposal_alarm` (`disposal_id`, `alarm_id`),
+  KEY `idx_da_alarm` (`alarm_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='处置单-告警证据关联';
+
+-- 处置单操作轨迹（每次状态推进、失败的提交与复核拒绝均留痕）
+DROP TABLE IF EXISTS `abnormal_disposal_trace`;
+CREATE TABLE `abnormal_disposal_trace` (
+  `id`            BIGINT       NOT NULL AUTO_INCREMENT,
+  `disposal_id`   BIGINT       NOT NULL COMMENT '处置单 id',
+  `disposal_no`   VARCHAR(40)  NOT NULL COMMENT '处置单编号（冗余便于审计）',
+  `action`        VARCHAR(32)  NOT NULL COMMENT '动作 CREATE/MEASURE/REQUEST_REVIEW/REVIEW_RECOVER/CLOSE/MERGE_ALARM/DATA_MISSING_CHOICE/REJECT/FAIL',
+  `from_status`   VARCHAR(16)  DEFAULT NULL COMMENT '动作前状态',
+  `to_status`     VARCHAR(16)  DEFAULT NULL COMMENT '动作后状态',
+  `operator_name` VARCHAR(32)  DEFAULT NULL COMMENT '操作人',
+  `result`        VARCHAR(16)  NOT NULL DEFAULT 'SUCCESS' COMMENT '结果 SUCCESS/FAILED',
+  `detail`        VARCHAR(512) DEFAULT NULL COMMENT '说明或失败原因',
+  `operate_time`  DATETIME     NOT NULL COMMENT '操作时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_trace_disposal` (`disposal_id`, `operate_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='处置单操作轨迹';
+
 -- =========================================================
 -- 种子数据（进厂时间用 UTC_TIMESTAMP() + INTERVAL 8 HOUR 相对偏移，保证任何时候演示都是「当日」数据）
 -- =========================================================
@@ -236,26 +325,26 @@ INSERT INTO `storage_pit`
 -- 焚烧炉：3 台炉排炉 + 2 台流化床 + 2 台回转窑（子类由判别公式 CASE WHEN 得出）
 INSERT INTO `incinerator`
   (`furnace_code`, `furnace_name`, `furnace_type_code`, `rated_capacity_tpd`, `furnace_temp_c`, `flue_gas_residence_s`,
-   `co_ppm`, `combustion_status`, `daily_process_ton`, `running_hours`, `last_start_time`, `grab_no`, `remark`,
+   `co_ppm`, `combustion_status`, `daily_process_ton`, `running_hours`, `last_start_time`, `grab_no`, `stack_code`, `remark`,
    `grate_speed_mh`, `grate_bed_thickness_mm`, `grate_stage_count`, `primary_air_temp_c`,
    `bed_material_height_mm`, `fluidizing_air_speed_ms`, `bed_temp_c`, `bed_material_size_mm`,
    `kiln_speed_rpm`, `kiln_inclination_deg`, `kiln_length_m`, `kiln_tail_temp_c`) VALUES
   -- 炉排炉
-  ('F-01', '1号机械炉排炉', 'GRATE', 750.00, 912.0, 2.60,  68.00, 'STABLE',   726.50, 6480.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 27 DAY), 'GRAB-01', '工况稳定，负荷 96%',
+  ('F-01', '1号机械炉排炉', 'GRATE', 750.00, 912.0, 2.60,  68.00, 'STABLE',   726.50, 6480.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 27 DAY), 'GRAB-01', 'STACK-F01', '工况稳定，负荷 96%',
      6.80, 820.0, 5, 218.0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL),
-  ('F-02', '2号机械炉排炉', 'GRATE', 750.00, 867.0, 2.10,  95.00, 'STABLE',   692.30, 6120.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 19 DAY), 'GRAB-02', '一次风量偏大，注意料层',
+  ('F-02', '2号机械炉排炉', 'GRATE', 750.00, 867.0, 2.10,  95.00, 'STABLE',   692.30, 6120.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 19 DAY), 'GRAB-02', 'STACK-F02', '一次风量偏大，注意料层',
      5.40, 760.0, 5, 205.0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL),
-  ('F-03', '3号机械炉排炉', 'GRATE', 600.00, 806.0, 1.80, 182.00, 'STARTING',  318.60, 5040.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL  6 HOUR), 'GRAB-03', '启炉升温中，未达 850℃ 达标线',
+  ('F-03', '3号机械炉排炉', 'GRATE', 600.00, 806.0, 1.80, 182.00, 'STARTING',  318.60, 5040.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL  6 HOUR), 'GRAB-03', 'STACK-F03', '启炉升温中，未达 850℃ 达标线',
      4.20, 610.0, 4, 186.0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL),
   -- 流化床
-  ('F-04', '1号循环流化床', 'FLUIDIZED', 400.00, 884.0, 2.30,  72.00, 'STABLE', 382.40, 4320.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 33 DAY), 'GRAB-02', '床温均匀，返料正常',
+  ('F-04', '1号循环流化床', 'FLUIDIZED', 400.00, 884.0, 2.30,  72.00, 'STABLE', 382.40, 4320.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 33 DAY), 'GRAB-02', 'STACK-F04', '床温均匀，返料正常',
      NULL, NULL, NULL, NULL, 1150.0, 3.60, 872.0, 1.20, NULL, NULL, NULL, NULL),
-  ('F-05', '2号循环流化床', 'FLUIDIZED', 350.00, 858.0, 2.00,  88.00, 'STABLE', 326.80, 3960.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 24 DAY), 'GRAB-04', '石英砂床料补充过 2 次',
+  ('F-05', '2号循环流化床', 'FLUIDIZED', 350.00, 858.0, 2.00,  88.00, 'STABLE', 326.80, 3960.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 24 DAY), 'GRAB-04', 'STACK-F05', '石英砂床料补充过 2 次',
      NULL, NULL, NULL, NULL, 1080.0, 3.25, 846.0, 1.05, NULL, NULL, NULL, NULL),
   -- 回转窑
-  ('F-06', '1号回转窑', 'ROTARY', 200.00, 895.0, 2.80,  60.00, 'STABLE',   178.20, 2880.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 41 DAY), 'GRAB-01', '协同处置少量一般工业固废',
+  ('F-06', '1号回转窑', 'ROTARY', 200.00, 895.0, 2.80,  60.00, 'STABLE',   178.20, 2880.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 41 DAY), 'GRAB-01', 'STACK-F06', '协同处置少量一般工业固废',
      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1.85, 2.50, 14.60, 968.0),
-  ('F-07', '2号回转窑', 'ROTARY', 150.00, 742.0, 1.60, 210.00, 'SHUTDOWN',   92.50, 1920.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 62 DAY), NULL,      '停炉待修：窑尾耐火砖更换',
+  ('F-07', '2号回转窑', 'ROTARY', 150.00, 742.0, 1.60, 210.00, 'SHUTDOWN',   92.50, 1920.0, DATE_SUB(UTC_TIMESTAMP() + INTERVAL 8 HOUR, INTERVAL 62 DAY), NULL,      'STACK-F07', '停炉待修：窑尾耐火砖更换',
      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0.60, 2.20, 12.80, 705.0);
 
 -- 启停炉与运行记录：12 条，覆盖 3 个月份与 5 台炉

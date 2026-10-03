@@ -82,6 +82,10 @@ public abstract class Incinerator {
     @Column(name = "grab_no", length = 16)
     private String grabNo;
 
+    /** 对应排放口编号：同炉严重排放告警据此归集到处置单 */
+    @Column(name = "stack_code", length = 32)
+    private String stackCode;
+
     @Column(name = "remark", length = 128)
     private String remark;
 
@@ -187,6 +191,14 @@ public abstract class Incinerator {
 
     public void setGrabNo(String grabNo) {
         this.grabNo = grabNo;
+    }
+
+    public String getStackCode() {
+        return stackCode;
+    }
+
+    public void setStackCode(String stackCode) {
+        this.stackCode = stackCode;
     }
 
     public String getRemark() {

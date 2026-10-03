@@ -4,7 +4,10 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
+import jakarta.persistence.LockModeType;
+
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -35,4 +38,11 @@ public interface IncineratorRepository extends JpaRepository<Incinerator, Long> 
     List<Incinerator> findHighSpeedFluidizedBeds(@Param("speed") BigDecimal speed);
 
     Optional<Incinerator> findByFurnaceCode(String furnaceCode);
+
+    /** 行锁加载焚烧炉：建单/合并证据/投料/复核恢复共用，保证同炉联锁动作严格串行 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Incinerator i where i.furnaceCode = :furnaceCode")
+    Optional<Incinerator> lockByFurnaceCode(@Param("furnaceCode") String furnaceCode);
+
+    Optional<Incinerator> findFirstByStackCode(String stackCode);
 }
